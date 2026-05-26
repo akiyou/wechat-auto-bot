@@ -1,0 +1,31 @@
+# Build output
+dist/
+build/
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/
+*.log
+
+# Test artifacts
+test_*.png
+test_*.txt
+verify_*.txt
+*_error.log
+*_stderr.log
+*_line_numbers.txt
+@AutomationLog.txt
+render_test.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Config with local data (template is tracked, actual usage is local)
+config.json

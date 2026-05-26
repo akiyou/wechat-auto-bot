@@ -1,0 +1,11 @@
+wxauto4>=41.0.0
+openai>=1.0.0
+httpx>=0.24.0
+psutil>=5.8.0
+customtkinter>=5.2.0
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+pywin32>=306
+# OCR 模式依赖（可选：使用 reading_method: "ocr" 时需要）
+pytesseract>=0.3.0
+opencv-python>=4.8.0
