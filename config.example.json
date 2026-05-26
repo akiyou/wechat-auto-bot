@@ -1,0 +1,46 @@
+{
+  "llm": {
+    "enabled": true,
+    "provider": "lm_studio",
+    "base_url": "http://localhost:1234/v1",
+    "api_key": "not-needed",
+    "model": "",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "system_prompt": ""
+  },
+  "bot": {
+    "enabled": true,
+    "driver": "hybrid",
+    "mode": "whitelist",
+    "contacts": [],
+    "blacklist": [],
+    "reply_prefix": "",
+    "mention_trigger": "豆咪",
+    "quiet_hours_start": "",
+    "quiet_hours_end": "",
+    "poll_interval_seconds": 2,
+    "reading_method": "clipboard"
+  },
+  "anti_detect": {
+    "enabled": true,
+    "read_delay_min": 1.0,
+    "read_delay_max": 3.0,
+    "reply_delay_min": 2.0,
+    "reply_delay_max": 8.0,
+    "typing_speed_min": 0.08,
+    "typing_speed_max": 0.2,
+    "max_chars_per_message": 300,
+    "message_interval_min": 1.0,
+    "message_interval_max": 2.5,
+    "random_skip_rate": 0.0,
+    "simulate_activity_interval": 0,
+    "idle_minutes_min": 0,
+    "idle_minutes_max": 0
+  },
+  "conversation": {
+    "max_history": 6,
+    "max_tokens": 2048,
+    "enabled": false
+  }
+}

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+logs/
+build/
+dist/
+*.spec
+*.log
+*.txt
+*.png
+config.json
+!uia_sidecar.exe
+!requirements.txt
