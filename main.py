@@ -163,8 +163,15 @@ def main():
                         help="配置文件路径 (默认: config.json)")
     parser.add_argument("--gui", action="store_true",
                         help="启动图形界面")
+    parser.add_argument("--cli", action="store_true",
+                        help="启动命令行模式（默认 GUI）")
 
     args = parser.parse_args()
+
+    # 无参数时默认启动 GUI（双击 exe 时）
+    has_action = args.gui or args.cli or args.test_wechat or args.test_llm or args.show_config
+    if not has_action:
+        args.gui = True
 
     # 加载配置
     config = Config(args.config)

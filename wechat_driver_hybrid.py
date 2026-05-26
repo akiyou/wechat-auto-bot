@@ -50,6 +50,7 @@ class WeChatDriverHybrid:
         self._fuzzy_threshold = fuzzy_match_threshold
         self._nickname = "WeChat"
         self._hwnd: Optional[int] = None
+        self._sent_buf: list[str] = []  # 最近发送的消息文本（去重用）
 
         # UIA 侧载路径检查
         if not os.path.isfile(SIDECAR_PATH):
@@ -189,25 +190,30 @@ class WeChatDriverHybrid:
             logger.error("检测到桌面内容而非微信聊天，停止所有任务")
             return "DESKTOP"
 
-        # 提取包含 @提及 的消息（最近一条新增的）
+        # 提取包含 @提及 的消息
         mention_lines = self._find_fuzzy_mention_lines(full_text)
+
+        # 过滤自己刚发出的消息（含 @触发词 的回复）
+        mention_lines = [l for l in mention_lines if not self._is_self_sent(l)]
+
         if not mention_lines:
             return []
 
-        # 对比上次记录，找出新增的
+        # 缓存当前快照，供 acknowledge_message 使用（避免 UIA 刷新延迟导致快照缺失回复）
+        self._snapshot_cache = full_text
+
+        # 对比上次已确认的快照，只返回新增的 @提及（快照在 acknowledge_message 时更新）
         last_text = getattr(self, f"_last_chat_text_{contact}", "")
-        setattr(self, f"_last_chat_text_{contact}", full_text)
-
         if last_text:
+            # 快照不为空 → 只取新增的
             last_mentions = set(self._find_fuzzy_mention_lines(last_text))
+            new_lines = [l for l in mention_lines if l not in last_mentions]
+            if not new_lines:
+                return []
+            clean_msg = new_lines[-1]
         else:
-            last_mentions = set()
-
-        new_lines = [l for l in mention_lines if l not in last_mentions]
-        if not new_lines:
-            return []
-
-        clean_msg = new_lines[-1]
+            # 首次读取，直接返回最新一条
+            clean_msg = mention_lines[-1]
         clean_msg = re.sub(
             rf'@{re.escape(self._mention_trigger)}[\w一-鿿]*',
             f'@{self._mention_trigger}',
@@ -254,7 +260,13 @@ class WeChatDriverHybrid:
         # 转义特殊字符（防止 shell 注入）
         safe_text = text.replace('"', '\\"')
         result = self._run_sidecar("send", safe_text, timeout=15)
-        return "SUCCESS" in result
+        ok = "SUCCESS" in result
+        if ok:
+            # 记录已发送文本，后续读取时过滤掉自己发的消息
+            self._sent_buf.append(text)
+            if len(self._sent_buf) > 100:
+                self._sent_buf = self._sent_buf[-50:]
+        return ok
 
     def send_message_slowly(self, who, text,
                             char_delay=(0.08, 0.2),
@@ -279,9 +291,28 @@ class WeChatDriverHybrid:
     #  消息确认
     # ══════════════════════════════════════════════════════
 
-    def acknowledge_message(self, contact: str) -> None:
-        """发送回复后的确认（不需要操作，纯后台无副作用）"""
-        pass
+    def acknowledge_message(self, contact: str, reply_text: str = "") -> None:
+        """发送回复后更新聊天快照，下次轮询不再返回同一条 @提及
+
+        使用 get_new_messages 时缓存的全量文本 + 回复内容作为快照，
+        避免 UIA 刷新延迟导致 bot 自己的回复（含 @触发词）被当作新消息。
+        """
+        cache = getattr(self, '_snapshot_cache', None)
+        if cache:
+            # 将刚发送的回复追加到缓存中，模拟回复出现后的聊天内容
+            if reply_text:
+                cache = cache + "\n" + reply_text
+            setattr(self, f"_last_chat_text_{contact}", cache)
+            logger.debug("已确认消息 [%s], 快照已更新 (cache)", contact)
+        else:
+            # 兜底：无缓存时直接读取
+            output = self._run_sidecar("read", timeout=15)
+            messages = self._parse_output(output)
+            if messages:
+                full_text = "\n".join(messages)
+                setattr(self, f"_last_chat_text_{contact}", full_text)
+                self._last_snap: dict[str, str] = {}  # 清理缓存
+            logger.debug("已确认消息 [%s], 快照已更新 (read)", contact)
 
     # ══════════════════════════════════════════════════════
     #  消息去重
@@ -290,6 +321,15 @@ class WeChatDriverHybrid:
     @staticmethod
     def is_new_message(contact: str, msg_id: str) -> bool:
         return True
+
+    # ── 自发送消息过滤 ──────────────────────────────────────
+
+    def _is_self_sent(self, line: str) -> bool:
+        """检查一行文本是否匹配最近发送的消息"""
+        for sent in self._sent_buf:
+            if sent in line or line in sent:
+                return True
+        return False
 
 
 class _RawWxStub:

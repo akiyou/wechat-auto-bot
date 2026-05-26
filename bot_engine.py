@@ -28,6 +28,7 @@ class BotEngine:
         )
         self._running = threading.Event()
         self._processed_msg_ids: set[str] = set()
+        self._retry_count: dict[str, int] = {}  # msg_id → retry attempts
         self._last_replied: dict[str, str] = {}  # contact → last replied content (防 Vision 非确定性问题)
 
     # ── 初始化 ──────────────────────────────────────────
@@ -167,14 +168,30 @@ class BotEngine:
 
     # ── 消息去重 ────────────────────────────────────────
 
+    MAX_RETRIES = 3
+
     def _is_duplicate(self, msg_id: str) -> bool:
-        if msg_id in self._processed_msg_ids:
-            return True
+        """只检查不添加，防止 LLM 失败后消息被吞"""
+        return msg_id in self._processed_msg_ids
+
+    def _mark_processed(self, msg_id: str) -> None:
+        """LLM 回复成功后才标记为已处理"""
         self._processed_msg_ids.add(msg_id)
-        # 控制集合大小防止内存泄漏
+        self._retry_count.pop(msg_id, None)
         if len(self._processed_msg_ids) > 10000:
             self._processed_msg_ids.clear()
-        return False
+
+    def _can_retry(self, msg_id: str) -> bool:
+        """检查是否超过最大重试次数"""
+        count = self._retry_count.get(msg_id, 0)
+        if count >= self.MAX_RETRIES:
+            # 超过上限，标记为已处理避免无限重试
+            logger.warning("消息重试已达上限，放弃 [%s]", msg_id[:40])
+            self._processed_msg_ids.add(msg_id)
+            self._retry_count.pop(msg_id, None)
+            return False
+        self._retry_count[msg_id] = count + 1
+        return True
 
     # ── 主循环 ──────────────────────────────────────────
 
@@ -191,10 +208,9 @@ class BotEngine:
             # 获取消息
             msgs = self.driver.get_new_messages(contact)
 
-            # 检测到桌面内容 → 立即停止
+            # 检测到桌面内容 → 跳过本轮，不停止（可能是临时切换到其他页面）
             if msgs == "DESKTOP":
-                logger.warning("读取到桌面内容而非微信，停止所有任务")
-                self.stop()
+                logger.warning("读取到桌面内容而非微信，跳过本轮")
                 return
 
             if not msgs or not self._running_check():
@@ -215,17 +231,27 @@ class BotEngine:
             content = latest["content"].strip()
             msg_id = latest.get("id", content[:40])
 
-            if not content or self._is_duplicate(msg_id) or not self._running_check():
+            if not content or not self._running_check():
                 return
 
-            # 防 LLM Vision 非确定性：同样的内容不发第二次
+            # 只检查不添加，防止 LLM 失败后消息被吞
+            if self._is_duplicate(msg_id):
+                logger.debug("跳过已处理消息 [%s]", contact)
+                return
+
+            # 防止 LLM 非确定性：同样内容不发第二次
             last_replied = self._last_replied.get(contact)
             if last_replied is not None and content == last_replied:
-                # 也记入去重集合，防止后续循环重复对比
                 logger.debug("跳过已回复的重复内容 [%s]", contact)
                 return
 
-            logger.info("收到消息 [%s]: %s", contact, content[:80])
+            # 重试次数检查（超过上限则标记已处理并放弃）
+            if not self._can_retry(msg_id):
+                self.driver.acknowledge_message(contact)  # 更新快照，避免重复读取
+                return
+
+            logger.info("收到消息 [%s]: %s [重试 #%d]", contact, content[:60],
+                         self._retry_count.get(msg_id, 1))
 
             # 随机跳过
             if self.anti_detect.should_skip() or not self._running_check():
@@ -240,7 +266,8 @@ class BotEngine:
             # 生成回复
             reply = self._generate_reply(contact, content)
             if not reply or not self._running_check():
-                logger.warning("LLM 未生成回复 [%s]", contact)
+                logger.warning("LLM 未生成回复 [%s] (将在下次轮询重试 %d/%d)",
+                               contact, self._retry_count.get(msg_id, 1), self.MAX_RETRIES)
                 return
 
             # 添加前缀
@@ -262,10 +289,11 @@ class BotEngine:
                 if i < len(chunks) - 1:
                     time.sleep(self.anti_detect.message_interval)
 
-            # 更新快照，防止下轮检测到自己的消息
-            self.driver.acknowledge_message(contact)
+            # 回复成功 → 标记已处理（防止重复）
+            self._mark_processed(msg_id)
+            self.driver.acknowledge_message(contact, reply)
 
-            # 记录已回复内容，防止 LLM Vision 非确定性导致的重复回复
+            # 记录已回复内容，防止重复
             self._last_replied[contact] = content
 
             logger.info("回复 [%s]: %s", contact, reply[:80])
@@ -302,18 +330,8 @@ class BotEngine:
                 try:
                     # 检查微信窗口是否在桌面可见
                     if not self.driver.is_window_visible():
-                        logger.info("微信窗口不可见，等待 60 秒...")
-                        for _ in range(30):
-                            if not self._running.is_set():
-                                break
-                            if self.driver.is_window_visible():
-                                logger.info("微信窗口已恢复，继续运行")
-                                break
-                            time.sleep(2)
-                        else:
-                            logger.warning("微信窗口超时未恢复，停止所有任务")
-                            self.stop()
-                            break
+                        logger.info("微信窗口不可见，跳过本轮（继续监测）")
+                        time.sleep(10)
                         continue
 
                     # 获取所有会话（PyAutoGUI 模式返回白名单列表）
