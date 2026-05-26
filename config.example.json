@@ -6,21 +6,21 @@
     "api_key": "not-needed",
     "model": "",
     "temperature": 0.7,
-    "max_tokens": 1024,
-    "system_prompt": "你是一个友好的微信助手。请用中文自然回复，保持对话流畅。回答应简洁得体，不要提及你是AI助手。"
+    "max_tokens": 4096,
+    "system_prompt": ""
   },
   "bot": {
     "enabled": true,
-    "driver": "pyautogui",
-    "reading_method": "llm_vision",
+    "driver": "hybrid",
     "mode": "whitelist",
     "contacts": [],
     "blacklist": [],
     "reply_prefix": "",
-    "mention_trigger": "bot",
+    "mention_trigger": "豆咪",
     "quiet_hours_start": "",
     "quiet_hours_end": "",
-    "poll_interval_seconds": 3
+    "poll_interval_seconds": 2,
+    "reading_method": "clipboard"
   },
   "anti_detect": {
     "enabled": true,

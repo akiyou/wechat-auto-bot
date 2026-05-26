@@ -36,7 +36,15 @@ class BotEngine:
         """根据配置创建微信驱动实例"""
         driver_type = self.cfg.bot.get("driver", "pyautogui")
 
-        if driver_type == "wxauto":
+        if driver_type == "hybrid":
+            from wechat_driver_hybrid import WeChatDriverHybrid
+            contacts = self.cfg.bot.get("contacts", [])
+            mention_trigger = self.cfg.bot.get("mention_trigger", "豆咪")
+            fuzzy_threshold = self.cfg.bot.get("fuzzy_match_threshold", 0.5)
+            return WeChatDriverHybrid(contacts,
+                                      mention_trigger=mention_trigger,
+                                      fuzzy_match_threshold=fuzzy_threshold)
+        elif driver_type == "wxauto":
             from wechat_driver import WeChatDriver
             return WeChatDriver()
         else:

@@ -39,7 +39,7 @@ class Config:
             },
             "bot": {
                 "enabled": True,
-                "driver": "pyautogui",
+                "driver": "hybrid",
                 "mode": "whitelist",
                 "contacts": [],
                 "blacklist": [],

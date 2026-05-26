@@ -675,20 +675,24 @@ class BotGUI(ctk.CTk):
 
     def _create_driver(self):
         """根据配置创建微信驱动实例"""
-        driver_type = self.config.bot.get("driver", "pyautogui")
+        driver_type = self.config.bot.get("driver", "hybrid")
         if driver_type == "wxauto":
             from wechat_driver import WeChatDriver
             return WeChatDriver()
+        elif driver_type == "hybrid":
+            from wechat_driver_hybrid import WeChatDriverHybrid
+            return WeChatDriverHybrid(self.config.bot.get("contacts", []))
         else:
             from wechat_driver_pyautogui import WeChatDriverPyAutoGUI
             return WeChatDriverPyAutoGUI(self.config.bot.get("contacts", []))
 
     def _load_contacts_from_wechat(self) -> None:
         def work():
-            driver_type = self.config.bot.get("driver", "pyautogui")
+            driver_type = self.config.bot.get("driver", "hybrid")
             if driver_type != "wxauto":
+                label = "PyAutoGUI" if driver_type == "pyautogui" else "混合"
                 self.after(0, lambda: messagebox.showinfo(
-                    "提示", "PyAutoGUI 模式无法从微信加载联系人\n\n"
+                    "提示", f"{label} 模式无法从微信加载联系人\n\n"
                     "请在「控制面板」手动输入联系人名称"))
                 return
             try:

@@ -1,31 +1,13 @@
-# Build output
-dist/
-build/
-*.spec
-
-# Python cache
 __pycache__/
 *.pyc
 *.pyo
-
-# Logs
 logs/
+build/
+dist/
+*.spec
 *.log
-
-# Test artifacts
-test_*.png
-test_*.txt
-verify_*.txt
-*_error.log
-*_stderr.log
-*_line_numbers.txt
-@AutomationLog.txt
-render_test.txt
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# Config with local data (template is tracked, actual usage is local)
+*.txt
+*.png
 config.json
+!uia_sidecar.exe
+!requirements.txt

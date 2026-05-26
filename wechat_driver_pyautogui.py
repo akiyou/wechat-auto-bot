@@ -19,8 +19,31 @@ import win32gui
 import win32api
 import win32process
 import win32con
+import ctypes
 
 logger = logging.getLogger("wechat_bot")
+
+# ── DPI 感知 ────────────────────────────────────────────
+
+def _enable_dpi_awareness():
+    """启用 DPI 感知，使 GetWindowRect 返回物理像素而非缩放后虚拟像素。
+
+    PyAutoGUI 操作（鼠标、截图）使用物理像素坐标，若不启用 DPI 感知，
+    GetWindowRect 在高 DPI 下可能返回缩放后的坐标，导致点击偏移。
+    尝试 Per-Monitor DPI Aware → System DPI Aware → 旧版 API，静默忽略失败。
+    """
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # System
+        except (AttributeError, OSError):
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()  # 旧版
+            except (AttributeError, OSError):
+                pass
+
+_enable_dpi_awareness()
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.0  # 手动控制延迟
@@ -102,6 +125,7 @@ class WeChatDriverPyAutoGUI:
         self._last_screenshot_hash: dict[str, str] = {}  # 截图 MD5 变化检测
         self._reading_method = reading_method
         self._llm = llm
+        self._calibrated_coords: dict[str, int | None] = {}  # UI 校准坐标缓存
 
         # OCR 初始化（仅需要时）
         if reading_method == "ocr":
@@ -111,6 +135,27 @@ class WeChatDriverPyAutoGUI:
         logger.info("初始化完成, 微信窗口: %s, 联系人: %s",
                      self._window_rect, self._contacts)
 
+    # ── DPI 缩放辅助 ─────────────────────────────────────
+
+    @staticmethod
+    def _get_dpi_scale(hwnd: int) -> float:
+        """获取窗口所在显示器的 DPI 缩放比（1.0 = 100%）。"""
+        try:
+            shcore = ctypes.windll.shcore
+            monitor = shcore.MonitorFromWindow(hwnd, 2)
+            dpi_x = ctypes.c_uint()
+            dpi_y = ctypes.c_uint()
+            shcore.GetDpiForMonitor(monitor, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y))
+            return dpi_x.value / 96.0
+        except Exception:
+            try:
+                caption = win32api.GetSystemMetrics(win32con.SM_CYCAPTION)
+                if caption > 0:
+                    return caption / 31.0
+            except Exception:
+                pass
+            return 1.0
+
     # ══════════════════════════════════════════════════════
     #  窗口管理
     # ══════════════════════════════════════════════════════
@@ -118,9 +163,12 @@ class WeChatDriverPyAutoGUI:
     def _find_and_prepare_window(self) -> bool:
         if not self._find_window():
             return False
-        # 不移动窗口，只记录位置
+        # 固定窗口尺寸，确保坐标计算一致性（跨屏幕/DPI）
+        self._resize_window()
         self._update_window_rect()
-        logger.info("微信窗口已找到，位置: %s", self._window_rect)
+        logger.info("微信窗口已定位到 (%d, %d) %dx%d",
+                     self._window_rect[0], self._window_rect[1],
+                     self.TARGET_WIDTH, self.TARGET_HEIGHT)
         return True
 
     def _find_window(self) -> bool:
@@ -152,6 +200,81 @@ class WeChatDriverPyAutoGUI:
     def _update_window_rect(self):
         if self._hwnd and win32gui.IsWindow(self._hwnd):
             self._window_rect = win32gui.GetWindowRect(self._hwnd)
+
+    def _resize_window(self):
+        """将微信窗口设为固定尺寸（900x700），确保百分比坐标精度。
+
+        统一窗口尺寸后，所有基于窗口宽高比的坐标计算（70%W / 45%H 等）
+        在不同屏幕上行为一致。不改变窗口位置（保留原始左上角坐标）。
+        """
+        if not self._hwnd or not win32gui.IsWindow(self._hwnd):
+            return
+        try:
+            l, t, _, _ = win32gui.GetWindowRect(self._hwnd)
+            win32gui.MoveWindow(self._hwnd, l, t,
+                                self.TARGET_WIDTH, self.TARGET_HEIGHT, True)
+            time.sleep(0.5)
+        except Exception as e:
+            logger.warning("调整窗口大小失败: %s", e)
+
+    def _calibrate_ui(self):
+        """通过像素方差自动定位输入框边界。
+
+        输入框区域背景颜色相对均匀（低方差），消息区域有文字/气泡（高方差）。
+        从底部向上扫描方差突变点即为输入框顶部边界。
+        坐标缓存后供 send_message 优先使用，失败回退百分比。
+        """
+        if not self._window_rect:
+            return
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            logger.info("OpenCV 未安装，跳过视觉校准")
+            return
+
+        try:
+            l, t, r, b = self._window_rect
+            ww, wh = r - l, b - t
+
+            # 切换到输入框所在的聊天——需要一个已知联系人做截图锚点
+            # 截取右侧底部区域（55%-100% 高度）
+            region_x = l + ww // 3
+            region_y = t + int(wh * 0.55)
+            region_w = ww * 2 // 3
+            region_h = int(wh * 0.45)
+
+            screenshot = pyautogui.screenshot(region=(region_x, region_y, region_w, region_h))
+            gray = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+
+            # 从底部向上计算每行像素方差，找到方差跳变点
+            h, w = gray.shape
+            var_history = []
+            for y in range(h):
+                row = gray[y, :].astype(np.float32)
+                var_history.append(np.var(row))
+
+            # 底部行均值（输入框区域 - 低方差）
+            bottom_mean = np.mean(var_history[h * 3 // 4:]) if h > 10 else 0
+            # 顶部行均值（消息区域 - 高方差）
+            top_mean = np.mean(var_history[h // 4:h // 2]) if h > 10 else 0
+            threshold = (top_mean + bottom_mean) / 2
+
+            # 从底部往上找到方差首次超过阈值的位置 = 输入框顶部
+            input_box_top = None
+            for y in range(h - 1, h // 3, -1):
+                if var_history[y] > threshold:
+                    input_box_top = region_y + y + 5  # +5 偏移到输入框内部
+                    break
+
+            if (input_box_top and input_box_top > region_y
+                    and input_box_top < t + int(wh * 0.92)):
+                self._calibrated_coords["input_box_y"] = input_box_top
+                logger.info("视觉校准: 输入框 Y=%d", input_box_top)
+            else:
+                logger.info("视觉校准: 未检测到输入框边界")
+        except Exception as e:
+            logger.warning("视觉校准异常: %s", e)
 
     def _activate(self, max_retries: int = 3) -> bool:
         """将微信窗口带到前台（多策略确保成功）"""
@@ -272,9 +395,10 @@ class WeChatDriverPyAutoGUI:
             l, t, r, b = self._window_rect
             ww = r - l
 
-            # 搜索栏位置（左侧面板顶部）
+            # 搜索栏位置（左侧面板顶部，按 DPI 缩放）
             sx = l + ww // 6
-            sy = t + 45
+            dpi_scale = self._get_dpi_scale(self._hwnd)
+            sy = t + int(45 * dpi_scale)
 
             # 点击搜索栏
             _human_move_click(sx, sy)
@@ -387,9 +511,10 @@ class WeChatDriverPyAutoGUI:
             ww, wh = r - l, b - t
 
             region_x = l + ww // 3 + 5
-            region_y = t + 70
+            dpi_scale = self._get_dpi_scale(self._hwnd)
+            region_y = t + int(70 * dpi_scale)
             region_w = (ww * 2) // 3 - 15
-            region_h = wh - 70 - 165
+            region_h = wh - int(70 * dpi_scale) - int(165 * dpi_scale)
 
             screenshot = pyautogui.screenshot(region=(region_x, region_y, region_w, region_h))
             # 预处理：灰度→反转→Otsu 二值化（适配暗色主题）
@@ -593,11 +718,18 @@ class WeChatDriverPyAutoGUI:
             pyperclip.copy(text)
             time.sleep(_rand(0.1, 0.2))
 
-            # 聚焦输入框（点击聊天区域底部）
+            # 聚焦输入框（优先使用校准坐标，回退百分比）
             l, t, r, b = self._window_rect
             ww, wh = r - l, b - t
             input_x = l + int(ww * 0.6)
-            input_y = t + int(wh * 0.75)
+            # 首次发送时尝试视觉校准（此时窗口已激活，截图内容准确）
+            if "input_box_y" not in self._calibrated_coords:
+                self._calibrate_ui()
+            calibrated_y = self._calibrated_coords.get("input_box_y")
+            if calibrated_y:
+                input_y = calibrated_y
+            else:
+                input_y = t + int(wh * 0.75)  # 回退百分比坐标
             _human_move_click(input_x, input_y)
             time.sleep(_rand(0.2, 0.4))
 

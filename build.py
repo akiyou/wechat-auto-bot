@@ -26,6 +26,8 @@ PyInstaller.__main__.run([
     # 显式隐藏导入（让 PyInstaller 能找到所有模块）
     '--hidden-import', 'wechat_driver_pyautogui',
     '--hidden-import', 'wechat_driver',
+    '--hidden-import', 'wechat_driver_hybrid',
+    '--add-data', 'uia_sidecar.exe;.',
     '--hidden-import', 'bot_engine',
     '--hidden-import', 'llm_client',
     '--hidden-import', 'anti_detect',
