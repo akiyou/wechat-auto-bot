@@ -189,25 +189,23 @@ class WeChatDriverHybrid:
             logger.error("检测到桌面内容而非微信聊天，停止所有任务")
             return "DESKTOP"
 
-        # 提取包含 @提及 的消息（最近一条新增的）
+        # 提取包含 @提及 的消息
         mention_lines = self._find_fuzzy_mention_lines(full_text)
         if not mention_lines:
             return []
 
-        # 对比上次记录，找出新增的
+        # 对比上次已确认的快照，只返回新增的 @提及（快照在 acknowledge_message 时更新）
         last_text = getattr(self, f"_last_chat_text_{contact}", "")
-        setattr(self, f"_last_chat_text_{contact}", full_text)
-
         if last_text:
+            # 快照不为空 → 只取新增的
             last_mentions = set(self._find_fuzzy_mention_lines(last_text))
+            new_lines = [l for l in mention_lines if l not in last_mentions]
+            if not new_lines:
+                return []
+            clean_msg = new_lines[-1]
         else:
-            last_mentions = set()
-
-        new_lines = [l for l in mention_lines if l not in last_mentions]
-        if not new_lines:
-            return []
-
-        clean_msg = new_lines[-1]
+            # 首次读取，直接返回最新一条
+            clean_msg = mention_lines[-1]
         clean_msg = re.sub(
             rf'@{re.escape(self._mention_trigger)}[\w一-鿿]*',
             f'@{self._mention_trigger}',
@@ -280,8 +278,15 @@ class WeChatDriverHybrid:
     # ══════════════════════════════════════════════════════
 
     def acknowledge_message(self, contact: str) -> None:
-        """发送回复后的确认（不需要操作，纯后台无副作用）"""
-        pass
+        """发送回复后更新聊天快照，下次轮询不再返回同一条 @提及"""
+        # 重新读取当前聊天内容，更新 last_text 快照
+        output = self._run_sidecar("read", timeout=15)
+        messages = self._parse_output(output)
+        if messages:
+            full_text = "\n".join(messages)
+            setattr(self, f"_last_chat_text_{contact}", full_text)
+            self._last_snap: dict[str, str] = {}  # 清理缓存
+        logger.debug("已确认消息 [%s], 快照已更新", contact)
 
     # ══════════════════════════════════════════════════════
     #  消息去重
