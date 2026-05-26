@@ -21,8 +21,8 @@
 - **智能回复** — 集成 LM Studio / OpenAI 兼容 API，支持多模型切换
 - **三种消息读取方式**：
   - `llm_vision` — LLM 视觉模型截图识别（默认，推荐）
-  - XXXXXXX无法使用`clipboard` — 剪贴板读取（最快速）
-  - XXXXXXX效果不好`ocr` — Tesseract OCR 识别（实验性）
+  - XXXXXXX`clipboard` — 剪贴板读取（最快速）无法使用
+  - XXXXXXX`ocr` — Tesseract OCR 识别（实验性）效果不好
 - **@提及触发** — 群聊中通过 `@触发词` 激活回复，支持模糊匹配（如 `@豆咪` 可匹配 `@豆味`）
 - **联系人白名单/黑名单** — 控制哪些联系人可以触发自动回复
 - **GUI 控制面板** — 基于 CustomTkinter 的可视化管理界面
