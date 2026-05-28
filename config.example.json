@@ -1,9 +1,9 @@
 {
   "llm": {
     "enabled": true,
-    "provider": "lm_studio",
+    "provider": "openai_compatible",
     "base_url": "http://localhost:1234/v1",
-    "api_key": "not-needed",
+    "api_key": "",
     "model": "",
     "temperature": 0.7,
     "max_tokens": 4096,
@@ -41,6 +41,6 @@
   "conversation": {
     "max_history": 6,
     "max_tokens": 2048,
-    "enabled": false
+    "enabled": true
   }
 }

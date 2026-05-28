@@ -85,8 +85,9 @@ class BotEngine:
         """初始化 LLM 客户端（非致命，失败不影响 bot 启动）"""
         try:
             self.llm = LLMClient(
-                base_url=self.cfg.llm.get("base_url", "http://localhost:1234/v1"),
-                api_key=self.cfg.llm.get("api_key", "not-needed"),
+                provider=self.cfg.llm.get("provider", "openai_compatible"),
+                base_url=self.cfg.llm.get("base_url", ""),
+                api_key=self.cfg.llm.get("api_key", ""),
                 model=self.cfg.llm.get("model", ""),
                 temperature=self.cfg.llm.get("temperature", 0.7),
                 max_tokens=self.cfg.llm.get("max_tokens", 1024),
@@ -96,12 +97,11 @@ class BotEngine:
             if ok:
                 models = self.llm.list_models()
                 if models:
-                    logger.info("LLM 可用, 模型: %s", models)
+                    logger.info("LLM 可用, 模型: %s", models[:3])
                 else:
                     logger.warning("LLM 连接成功但未获取到模型列表")
             else:
-                logger.error("LLM 连接失败，请检查 LM Studio 是否已启动")
-                logger.error("Bot 将继续运行（不使用 LLM 回复）")
+                logger.error("LLM 连接失败，Bot 将继续运行（不使用 LLM 回复）")
                 self.llm = None
         except Exception as e:
             logger.error("LLM 初始化异常: %s", e)

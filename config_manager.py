@@ -29,9 +29,9 @@ class Config:
         return {
             "llm": {
                 "enabled": False,
-                "provider": "lm_studio",
-                "base_url": "http://localhost:1234/v1",
-                "api_key": "not-needed",
+                "provider": "openai_compatible",
+                "base_url": "",
+                "api_key": "",
                 "model": "",
                 "temperature": 0.7,
                 "max_tokens": 1024,

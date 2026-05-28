@@ -267,7 +267,21 @@ class BotGUI(ctk.CTk):
         self._llm_enabled_label = ctk.CTkLabel(frame_enable, text="(关闭后将使用 echo 回复)")
         self._llm_enabled_label.pack(side="left", padx=10)
 
-        # Base URL / API Key
+        # Provider 选择
+        frame_provider = ctk.CTkFrame(scroll)
+        frame_provider.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(frame_provider, text="Provider:").pack(anchor="w")
+        self._llm_provider_var = tk.StringVar(value="openai_compatible")
+        self._llm_provider_menu = ctk.CTkOptionMenu(
+            frame_provider, variable=self._llm_provider_var,
+            values=["openai_compatible", "deepseek"],
+            command=self._on_provider_change)
+        self._llm_provider_menu.pack(fill="x", pady=(2, 0))
+        self._llm_provider_hint = ctk.CTkLabel(
+            frame_provider, text="", font=("", 11), text_color="gray")
+        self._llm_provider_hint.pack(anchor="w", pady=(2, 0))
+
+        # Base URL
         frame_url = ctk.CTkFrame(scroll)
         frame_url.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(frame_url, text="Base URL:").pack(anchor="w")
@@ -276,10 +290,11 @@ class BotGUI(ctk.CTk):
         self._llm_url_entry = ctk.CTkEntry(frame_url, textvariable=self._llm_url_var)
         self._llm_url_entry.pack(fill="x", pady=(2, 0))
 
+        # API Key
         frame_key = ctk.CTkFrame(scroll)
         frame_key.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(frame_key, text="API Key:").pack(anchor="w")
-        self._llm_key_var = tk.StringVar(value="not-needed")
+        self._llm_key_var = tk.StringVar(value="")
         self._llm_key_entry = ctk.CTkEntry(frame_key, textvariable=self._llm_key_var, show="*")
         self._llm_key_entry.pack(fill="x", pady=(2, 0))
 
@@ -291,7 +306,7 @@ class BotGUI(ctk.CTk):
         row.pack(fill="x")
         self._llm_model_var = tk.StringVar(value="")
         self._model_menu = ctk.CTkOptionMenu(row, variable=self._llm_model_var,
-                                              values=["(点击刷新)"], dynamic_resizing=False)
+                                              values=["(自动)"], dynamic_resizing=False)
         self._model_menu.pack(side="left", fill="x", expand=True)
         self._btn_refresh_models = ctk.CTkButton(row, text="🔄 刷新", width=70,
                                                    command=self._fetch_models)
@@ -355,7 +370,7 @@ class BotGUI(ctk.CTk):
     def _set_llm_widgets_state(self, enabled: bool) -> None:
         """启用/灰化 LLM 设置区的所有控件"""
         state = "normal" if enabled else "disabled"
-        for w in [self._llm_url_entry, self._llm_key_entry,
+        for w in [self._llm_provider_menu, self._llm_url_entry, self._llm_key_entry,
                   self._model_menu, self._btn_refresh_models,
                   self._llm_temp_slider, self._llm_maxtok_slider,
                   self._llm_sysprompt]:
@@ -363,6 +378,36 @@ class BotGUI(ctk.CTk):
                 w.configure(state=state)
             except Exception:
                 pass
+        # Provider 特定状态
+        if enabled:
+            self._apply_provider_ui()
+
+    def _on_provider_change(self, choice: str = None) -> None:
+        """Provider 切换时调整 UI"""
+        self._apply_provider_ui()
+        # 切到 deepseek 时预填模型
+        p = self._llm_provider_var.get()
+        if p == "deepseek" and not self._llm_model_var.get():
+            self._llm_model_var.set("deepseek-chat")
+        elif p == "openai_compatible":
+            self._llm_model_var.set("")
+            self.after(500, self._fetch_models)
+
+    def _apply_provider_ui(self) -> None:
+        """根据当前 provider 调整控件状态"""
+        p = self._llm_provider_var.get()
+        url_enabled = self._llm_enabled_var.get()
+        hints = {
+            "openai_compatible": "适用于 LM Studio、OpenAI、Groq、DeepSeek 等 OpenAI 兼容 API",
+            "deepseek": "使用 DeepSeek API，Base URL 固定为 https://api.deepseek.com/v1",
+        }
+        self._llm_provider_hint.configure(text=hints.get(p, ""))
+
+        if p == "deepseek":
+            self._llm_url_var.set("https://api.deepseek.com/v1")
+            self._llm_url_entry.configure(state="disabled")
+        else:
+            self._llm_url_entry.configure(state="normal" if url_enabled else "disabled")
 
     # ── Tab 2: 反检测 ────────────────────────────────
 
@@ -557,8 +602,9 @@ class BotGUI(ctk.CTk):
 
         # LLM
         self._llm_enabled_var.set(cfg.llm.get("enabled", False))
-        self._llm_url_var.set(cfg.llm.get("base_url", "http://localhost:1234/v1"))
-        self._llm_key_var.set(cfg.llm.get("api_key", "not-needed"))
+        self._llm_provider_var.set(cfg.llm.get("provider", "openai_compatible"))
+        self._llm_url_var.set(cfg.llm.get("base_url", ""))
+        self._llm_key_var.set(cfg.llm.get("api_key", ""))
         self._llm_model_var.set(cfg.llm.get("model", ""))
         self._llm_temp_var.set(cfg.llm.get("temperature", 0.7))
         self._llm_maxtok_var.set(cfg.llm.get("max_tokens", 1024))
@@ -589,6 +635,7 @@ class BotGUI(ctk.CTk):
 
         # Update LLM widgets state
         self._on_llm_enabled_toggle()
+        self._on_provider_change()
 
     def _save_config(self) -> None:
         """将 UI 控件值写入 config 并保存"""
@@ -606,6 +653,7 @@ class BotGUI(ctk.CTk):
 
         # LLM
         cfg.llm["enabled"] = self._llm_enabled_var.get()
+        cfg.llm["provider"] = self._llm_provider_var.get()
         cfg.llm["base_url"] = self._llm_url_var.get()
         cfg.llm["api_key"] = self._llm_key_var.get()
         cfg.llm["model"] = self._llm_model_var.get()
@@ -836,11 +884,14 @@ class BotGUI(ctk.CTk):
             key = self._llm_key_var.get()
             model = self._llm_model_var.get()
             try:
-                client = LLMClient(base_url=url, api_key=key, model=model)
+                client = LLMClient(
+                    provider=self._llm_provider_var.get(),
+                    base_url=url, api_key=key, model=model)
                 ok = client.test_connection()
                 if ok:
                     reply = client.chat("你好，请用一句话简单介绍你自己")
-                    msg = (f"LM Studio 连接成功!\n\n"
+                    pname = self._llm_provider_var.get()
+                    msg = (f"{pname} 连接成功!\n\n"
                            f"回复: {reply}")
                     self.after(0, lambda: messagebox.showinfo("测试 LLM", msg))
                     self.after(0, lambda: self._update_status(
@@ -858,7 +909,9 @@ class BotGUI(ctk.CTk):
             url = self._llm_url_var.get()
             key = self._llm_key_var.get()
             try:
-                client = LLMClient(base_url=url, api_key=key)
+                client = LLMClient(
+                    provider=self._llm_provider_var.get(),
+                    base_url=url, api_key=key)
                 models = client.list_models()
                 self.after(0, lambda: self._on_models_fetched(models))
             except Exception as e:
