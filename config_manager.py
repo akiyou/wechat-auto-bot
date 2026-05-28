@@ -1,14 +1,23 @@
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional, Union
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.json"
+
+def _default_config_path() -> Path:
+    """返回配置路径（PyInstaller exe 优先加载同目录 config.json）"""
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).parent
+        local = exe_dir / "config.json"
+        if local.exists():
+            return local
+    return Path(__file__).parent / "config.json"
 
 
 class Config:
     def __init__(self, path: Optional[Union[str, Path]] = None):
-        self.path = Path(path) if path else DEFAULT_CONFIG_PATH
+        self.path = Path(path) if path else _default_config_path()
         self._data: dict[str, Any] = {}
         self.load()
 
