@@ -6,12 +6,17 @@ from typing import Any, Optional, Union
 
 
 def _default_config_path() -> Path:
-    """返回配置路径（PyInstaller exe 优先加载同目录 config.json）"""
+    """返回配置路径（PyInstaller exe 自动复制到同目录，方便用户编辑）"""
     if getattr(sys, 'frozen', False):
         exe_dir = Path(sys.executable).parent
         local = exe_dir / "config.json"
-        if local.exists():
-            return local
+        if not local.exists():
+            # 首次运行：从内嵌配置复制到 exe 目录
+            bundled = Path(__file__).parent / "config.json"
+            if bundled.exists():
+                import shutil
+                shutil.copy2(bundled, local)
+        return local
     return Path(__file__).parent / "config.json"
 
 
