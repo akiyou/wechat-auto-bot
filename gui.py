@@ -274,7 +274,7 @@ class BotGUI(ctk.CTk):
         self._llm_provider_var = tk.StringVar(value="openai_compatible")
         self._llm_provider_menu = ctk.CTkOptionMenu(
             frame_provider, variable=self._llm_provider_var,
-            values=["openai_compatible", "deepseek"],
+            values=["openai_compatible", "deepseek", "deepseek-anthropic"],
             command=self._on_provider_change)
         self._llm_provider_menu.pack(fill="x", pady=(2, 0))
         self._llm_provider_hint = ctk.CTkLabel(
@@ -385,10 +385,13 @@ class BotGUI(ctk.CTk):
     def _on_provider_change(self, choice: str = None) -> None:
         """Provider 切换时调整 UI"""
         self._apply_provider_ui()
-        # 切到 deepseek 时预填模型
         p = self._llm_provider_var.get()
-        if p == "deepseek" and not self._llm_model_var.get():
-            self._llm_model_var.set("deepseek-chat")
+        models_preset = {
+            "deepseek": "deepseek-chat",
+            "deepseek-anthropic": "deepseek-v4-flash",
+        }
+        if p in models_preset:
+            self._llm_model_var.set(models_preset[p])
         elif p == "openai_compatible":
             self._llm_model_var.set("")
             self.after(500, self._fetch_models)
@@ -399,12 +402,12 @@ class BotGUI(ctk.CTk):
         url_enabled = self._llm_enabled_var.get()
         hints = {
             "openai_compatible": "适用于 LM Studio、OpenAI、Groq、DeepSeek 等 OpenAI 兼容 API",
-            "deepseek": "使用 DeepSeek API，Base URL 固定为 https://api.deepseek.com/v1",
+            "deepseek": "DeepSeek OpenAI 兼容接口 → https://api.deepseek.com/v1",
+            "deepseek-anthropic": "DeepSeek Anthropic 兼容接口 → https://api.deepseek.com/anthropic",
         }
         self._llm_provider_hint.configure(text=hints.get(p, ""))
 
-        if p == "deepseek":
-            self._llm_url_var.set("https://api.deepseek.com/v1")
+        if p in ("deepseek", "deepseek-anthropic"):
             self._llm_url_entry.configure(state="disabled")
         else:
             self._llm_url_entry.configure(state="normal" if url_enabled else "disabled")

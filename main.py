@@ -26,6 +26,11 @@ def setup_logging():
     log_dir = Path(__file__).parent / "logs"
     log_dir.mkdir(exist_ok=True)
 
+    # Windows GBK 控制台无法输出某些 Unicode 字符
+    import sys, io
+    if sys.stdout and hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     logging.basicConfig(
         level=logging.INFO,
         format=LOG_FORMAT,
@@ -99,12 +104,13 @@ def test_wechat(driver_type: str = "pyautogui"):
 
 
 def test_llm(config: Config):
-    """测试 LM Studio 连接"""
+    """测试 LLM 连接"""
     print("=" * 50)
-    print("测试 LM Studio 连接...")
+    llm_cfg = config.llm
+    provider = llm_cfg.get("provider", "openai_compatible")
+    print(f"测试 {provider} 连接...")
     print("=" * 50)
 
-    llm_cfg = config.llm
     if not llm_cfg.get("enabled", False):
         print("[!] LLM 功能未启用 (config.json 中 llm.enabled = false)")
         print("    是否仍要测试？(y/n): ", end="", flush=True)
@@ -113,8 +119,9 @@ def test_llm(config: Config):
             return False
 
     client = LLMClient(
-        base_url=llm_cfg.get("base_url", "http://localhost:1234/v1"),
-        api_key=llm_cfg.get("api_key", "not-needed"),
+        provider=provider,
+        base_url=llm_cfg.get("base_url", ""),
+        api_key=llm_cfg.get("api_key", ""),
         model=llm_cfg.get("model", ""),
         temperature=llm_cfg.get("temperature", 0.7),
         max_tokens=llm_cfg.get("max_tokens", 1024),
@@ -124,20 +131,22 @@ def test_llm(config: Config):
     ok = client.test_connection()
     if ok:
         models = client.list_models()
-        print(f"[OK] LM Studio 连接成功!")
+        print(f"[OK] {provider} 连接成功!")
         if models:
             print(f"[OK] 可用模型: {models}")
         else:
             print("[!] 未获取到模型列表")
 
         print("\n测试对话:")
-        reply = client.chat("你好，请用一句话介绍你自己")
-        print(f"回复: {reply}")
+        try:
+            reply = client.chat("你好，请用一句话介绍你自己")
+            print(f"回复: {reply}")
+        except Exception as e:
+            print(f"[ERR] 对话测试失败: {e}")
         return True
     else:
-        print(f"[ERR] LM Studio 连接失败")
-        print(f"    请确保 LM Studio 已启动且 API 服务已开启")
-        print(f"    地址: {llm_cfg.get('base_url')}")
+        print(f"[ERR] {provider} 连接失败")
+        print(f"    请检查配置中的 api_key 和 network 连接")
         return False
 
 
